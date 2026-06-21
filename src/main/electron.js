@@ -1,6 +1,7 @@
 const { app, BrowserWindow, screen, ipcMain } = require('electron')
 const path = require('path')
 const { captureScreen } = require('../services/captureService')
+const { understand } = require('../services/visionService')
 
 const isDev = process.env.NODE_ENV === 'development'
 const isMac = process.platform === 'darwin'
@@ -68,6 +69,10 @@ function createWindow() {
 
 app.whenReady().then(() => {
   ipcMain.handle('capture-screen', () => captureScreen())
+  ipcMain.handle('understand-screen', async () => {
+    const imagePath = await captureScreen()
+    return understand(imagePath)
+  })
 
   createWindow()
 
