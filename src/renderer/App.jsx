@@ -27,8 +27,12 @@ export default function App() {
     setText('')
     try {
       const result = await window.native.understandScreen()
-      setText(result.text)
-      setStatus('Done')
+      if (result.changed) {
+        setText(result.text)
+        setStatus('Done')
+      } else {
+        setStatus('No change')
+      }
     } catch (err) {
       setStatus(`Error: ${err.message}`)
     }
