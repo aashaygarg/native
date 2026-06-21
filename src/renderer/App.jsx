@@ -6,12 +6,12 @@ const noDrag = { WebkitAppRegion: 'no-drag' }
 export default function App() {
   const [status, setStatus] = useState('Idle')
   const [imagePath, setImagePath] = useState('')
-  const [text, setText] = useState('')
+  const [answer, setAnswer] = useState('')
 
   async function handleCapture() {
     setStatus('Capturing…')
     setImagePath('')
-    setText('')
+    setAnswer('')
     try {
       const filePath = await window.native.captureScreen()
       setImagePath(filePath)
@@ -24,11 +24,11 @@ export default function App() {
   async function handleUnderstand() {
     setStatus('Understanding…')
     setImagePath('')
-    setText('')
+    setAnswer('')
     try {
       const result = await window.native.understandScreen()
       if (result.changed) {
-        setText(result.text)
+        setAnswer(result.answer)
         setStatus('Done')
       } else {
         setStatus('No change')
@@ -73,9 +73,9 @@ export default function App() {
           <p className="break-all text-xs text-neutral-300">{imagePath}</p>
         )}
 
-        {text && (
+        {answer && (
           <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-neutral-200">
-            {text}
+            {answer}
           </pre>
         )}
       </main>

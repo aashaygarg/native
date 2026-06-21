@@ -2,6 +2,7 @@ const { app, BrowserWindow, screen, ipcMain } = require('electron')
 const path = require('path')
 const { captureScreen } = require('../services/captureService')
 const { captureAndUnderstand, startIntentTracking } = require('../services/perceptionService')
+const { solve } = require('../services/reasoningService')
 
 const isDev = process.env.NODE_ENV === 'development'
 const isMac = process.platform === 'darwin'
@@ -70,7 +71,15 @@ function createWindow() {
 app.whenReady().then(() => {
   startIntentTracking()
   ipcMain.handle('capture-screen', () => captureScreen())
-  ipcMain.handle('understand-screen', () => captureAndUnderstand())
+  // Perception (frozen) reads the intent window into text; append reasoning to
+  // turn that text into an answer:
+  //   intent window -> adaptive OCR -> text -> qwen3-coder -> answer
+  ipcMain.handle('understand-screen', async () => {
+    const result = await captureAndUnderstand()
+    if (!result.changed) return result
+    const { answer } = await solve(result.text)
+    return { changed: true, answer }
+  })
 
   createWindow()
 
