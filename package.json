@@ -1,0 +1,28 @@
+{
+  "name": "native",
+  "version": "0.1.0",
+  "description": "Native — a local desktop AI assistant",
+  "private": true,
+  "main": "src/main/electron.js",
+  "scripts": {
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && NODE_ENV=development electron .",
+    "dev": "concurrently -k -n vite,electron \"npm:dev:vite\" \"npm:dev:electron\"",
+    "build": "vite build",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "electron": "^33.2.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  }
+}
