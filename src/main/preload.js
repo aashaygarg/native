@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('native', {
   captureScreen: () => ipcRenderer.invoke('capture-screen'),
-  understandScreen: () => ipcRenderer.invoke('understand-screen'),
+  understandScreen: (question) => ipcRenderer.invoke('understand-screen', question),
   // Subscribe to streamed answer tokens; returns an unsubscribe function.
   onAnswerChunk: (cb) => {
     const listener = (_e, chunk) => cb(chunk)

@@ -75,10 +75,10 @@ app.whenReady().then(() => {
   // turn that text into an answer, streaming tokens to the overlay as they
   // arrive:
   //   intent window -> adaptive OCR -> text -> qwen3-coder stream -> answer
-  ipcMain.handle('understand-screen', async (event) => {
+  ipcMain.handle('understand-screen', async (event, question) => {
     const result = await captureAndUnderstand()
     if (!result.changed) return result
-    const answer = await streamSolve(result.text, (chunk) => {
+    const answer = await streamSolve(result.text, question, (chunk) => {
       event.sender.send('understand-screen-chunk', chunk)
     })
     return { changed: true, answer }

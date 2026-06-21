@@ -7,6 +7,7 @@ export default function App() {
   const [status, setStatus] = useState('Idle')
   const [imagePath, setImagePath] = useState('')
   const [answer, setAnswer] = useState('')
+  const [question, setQuestion] = useState('')
 
   async function handleCapture() {
     setStatus('Capturing…')
@@ -29,7 +30,7 @@ export default function App() {
       setAnswer((prev) => prev + chunk)
     })
     try {
-      const result = await window.native.understandScreen()
+      const result = await window.native.understandScreen(question)
       if (result.changed) {
         setAnswer(result.answer)
         setStatus('Done')
@@ -71,6 +72,15 @@ export default function App() {
             Understand Screen
           </button>
         </div>
+
+        <input
+          style={noDrag}
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleUnderstand() }}
+          placeholder="Ask something..."
+          className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 outline-none focus:border-white/20"
+        />
 
         <p className="text-xs text-neutral-400">{status}</p>
 

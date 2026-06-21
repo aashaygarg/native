@@ -1,5 +1,5 @@
-// Reasoning (Phase 5):
-//   OCR text -> qwen3-coder -> answer
+// Reasoning (Phase 6.5):
+//   OCR text + user question -> qwen3-coder stream -> answer
 //
 // The perception engine hands us the text it read from the intent window. This
 // service works out what the user implicitly needs from that text and answers
@@ -20,16 +20,27 @@ const PROMPT =
   '- Error message or stack trace: give the diagnosis, then the fix.\n' +
   '- Article or prose: give a short summary.\n' +
   '- Terminal output: give the root cause, then the commands to run.\n' +
-  'Answer only, no preamble.\n\n' +
-  'Screen text:\n'
+  'If the user gives a request, follow it exactly. Answer only, no preamble.\n'
 
-async function streamSolve(text, onChunk) {
+// Used when the user types nothing into the overlay input.
+const DEFAULT_REQUEST = 'Understand and help with what is on screen.'
+
+// Combine the screen context with the user's question (or the default).
+function buildPrompt(text, question) {
+  const request = (question && question.trim()) ? question.trim() : DEFAULT_REQUEST
+  return PROMPT +
+    '\nVisible content:\n' + text +
+    '\n\nUser request:\n' + request +
+    '\n\nGenerate a helpful answer.'
+}
+
+async function streamSolve(text, question, onChunk) {
   const response = await fetch(OLLAMA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
-      prompt: PROMPT + text,
+      prompt: buildPrompt(text, question),
       stream: true,
     }),
   })
