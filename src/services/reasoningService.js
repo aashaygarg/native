@@ -23,14 +23,14 @@ const PROMPT =
   'Answer only, no preamble.\n\n' +
   'Screen text:\n'
 
-async function solve(text) {
+async function streamSolve(text, onChunk) {
   const response = await fetch(OLLAMA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
       prompt: PROMPT + text,
-      stream: false,
+      stream: true,
     }),
   })
 
@@ -38,8 +38,29 @@ async function solve(text) {
     throw new Error(`Ollama request failed: ${response.status}`)
   }
 
-  const data = await response.json()
-  return { answer: (data.response || '').trim() }
+  // Ollama streams newline-delimited JSON: one { response, done } per token.
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let answer = ''
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let nl
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).trim()
+      buffer = buffer.slice(nl + 1)
+      if (!line) continue
+      let obj
+      try { obj = JSON.parse(line) } catch (e) { continue }
+      if (obj.response) {
+        answer += obj.response
+        onChunk(obj.response)
+      }
+    }
+  }
+  return answer.trim()
 }
 
-module.exports = { solve }
+module.exports = { streamSolve }

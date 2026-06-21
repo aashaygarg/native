@@ -25,6 +25,9 @@ export default function App() {
     setStatus('Understanding…')
     setImagePath('')
     setAnswer('')
+    const off = window.native.onAnswerChunk((chunk) => {
+      setAnswer((prev) => prev + chunk)
+    })
     try {
       const result = await window.native.understandScreen()
       if (result.changed) {
@@ -35,6 +38,8 @@ export default function App() {
       }
     } catch (err) {
       setStatus(`Error: ${err.message}`)
+    } finally {
+      off()
     }
   }
 
