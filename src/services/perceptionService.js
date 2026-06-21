@@ -9,7 +9,7 @@
 // qwen3-coder. State (previous thumbnail + previous text + last clicked window)
 // is kept in module scope.
 
-const { nativeImage } = require('electron')
+const { nativeImage, screen } = require('electron')
 const { execFileSync, spawn } = require('child_process')
 const readline = require('readline')
 const fs = require('fs')
@@ -21,9 +21,9 @@ const SCREENCAPTURE = '/usr/sbin/screencapture'
 const WINDOW_PNG = '/tmp/native-window.png'
 
 const WINQUERY_SRC = '/tmp/native-winquery.swift'
-const WINQUERY_BIN = '/tmp/native-winquery'
+const WINQUERY_BIN = '/tmp/native-winquery-v2'
 const CLICKMON_SRC = '/tmp/native-clickmon.swift'
-const CLICKMON_BIN = '/tmp/native-clickmon'
+const CLICKMON_BIN = '/tmp/native-clickmon-v2'
 
 // Synchronous window query: frontmost app's largest window + the window under
 // the cursor, each with the signals needed to recognise (and exclude) Native:
@@ -59,7 +59,9 @@ func info(_ w: [String: Any]?) -> [String: Any] {
     "layer": (w[kCGWindowLayer as String] as? Int) ?? 0,
     "bundleId": bundleId(pid),
     "width": (b["Width"] as? Double) ?? 0,
-    "height": (b["Height"] as? Double) ?? 0
+    "height": (b["Height"] as? Double) ?? 0,
+    "x": (b["X"] as? Double) ?? 0,
+    "y": (b["Y"] as? Double) ?? 0
   ]
 }
 
@@ -123,7 +125,9 @@ func info(_ w: [String: Any]?) -> [String: Any] {
     "layer": (w[kCGWindowLayer as String] as? Int) ?? 0,
     "bundleId": bundleId(pid),
     "width": (b["Width"] as? Double) ?? 0,
-    "height": (b["Height"] as? Double) ?? 0
+    "height": (b["Height"] as? Double) ?? 0,
+    "x": (b["X"] as? Double) ?? 0,
+    "y": (b["Y"] as? Double) ?? 0
   ]
 }
 
@@ -133,6 +137,8 @@ clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rig
   let p = cursor()
   var chosen: [String: Any]? = nil
   for w in windowsList() {
+    let layer = (w[kCGWindowLayer as String] as? Int) ?? 0
+    if layer != 0 { continue }
     let b = (w[kCGWindowBounds as String] as? [String: Any]) ?? [:]
     if contains(b, p) { chosen = w; break }
   }
@@ -190,7 +196,15 @@ function startIntentTracking() {
       } catch (e) {
         return
       }
-      if (w.windowId > 0 && !isNative(w)) lastClicked = w
+      if (w.windowId > 0 && !isNative(w)) {
+        lastClicked = w
+        console.log(
+          'CLICK\n  app: ' + w.appName +
+          '\n  title: ' + (w.windowTitle || '') +
+          '\n  time: ' + new Date().toTimeString().slice(0, 8) +
+          '\n  intent updated'
+        )
+      }
     })
     process.on('exit', () => clickChild && clickChild.kill())
   }
@@ -213,12 +227,21 @@ function captureWindow(windowId, outPath) {
 // No pin UI yet (Phase 5+); kept as the top of the hierarchy so a future pin
 // can populate it without changing the resolution order.
 let pinnedWindowId = null
+let pinnedContext = null
 
 // The window signals adaptive OCR classifies on. Pinned windows carry only an
 // id (no metadata yet), so they resolve to null context -> unknown -> Vision.
 function contextOf(w) {
   if (!w) return null
-  return { appName: w.appName || '', bundleId: w.bundleId || '', windowTitle: w.windowTitle || '' }
+  return {
+    appName: w.appName || '',
+    bundleId: w.bundleId || '',
+    windowTitle: w.windowTitle || '',
+    x: w.x || 0,
+    y: w.y || 0,
+    width: w.width || 0,
+    height: w.height || 0,
+  }
 }
 
 // Intent-window hierarchy: pinned -> last clicked non-Native -> frontmost app
@@ -292,6 +315,11 @@ async function captureAndUnderstand() {
   // capture only it. Fall back to a full-screen capture (current monitor /
   // desktop) only when no window resolves.
   const { windowId, context } = resolveIntentWindow()
+  console.log(
+    'UNDERSTAND\n  context: ' +
+    (context ? context.appName + ' — ' + (context.windowTitle || '') : '(fallback: monitor / desktop)') +
+    '\n  time: ' + new Date().toTimeString().slice(0, 8)
+  )
   let imagePath
   if (windowId) {
     captureWindow(windowId, WINDOW_PNG)
@@ -321,4 +349,46 @@ async function captureAndUnderstand() {
   return { changed: true, text }
 }
 
-module.exports = { captureAndUnderstand, startIntentTracking }
+// Phase 7 (UX) read-only hooks. currentContext() exposes the window signals the
+// overlay shows in its pin label; pinIntentWindow() toggles the pin using the
+// existing pinnedWindowId hook. Neither changes how perception resolves, crops,
+// diffs, or OCRs.
+// Map a window's center point to a 1-based monitor index for the debug panel.
+function monitorFor(ctx) {
+  if (!ctx) return 0
+  try {
+    const cx = Math.round((ctx.x || 0) + (ctx.width || 0) / 2)
+    const cy = Math.round((ctx.y || 0) + (ctx.height || 0) / 2)
+    const d = screen.getDisplayNearestPoint({ x: cx, y: cy })
+    const idx = screen.getAllDisplays().findIndex((m) => m.id === d.id)
+    return idx >= 0 ? idx + 1 : 1
+  } catch (e) {
+    return 0
+  }
+}
+
+function currentContext() {
+  const pinned = !!pinnedWindowId
+  const ctx = pinned ? pinnedContext : resolveIntentWindow().context
+  if (!ctx) return { appName: '', windowTitle: '', monitor: 0, pinned }
+  return { ...ctx, monitor: monitorFor(ctx), pinned }
+}
+
+function pinIntentWindow() {
+  if (pinnedWindowId) {
+    pinnedWindowId = null
+    pinnedContext = null
+    return { pinned: false }
+  }
+  const r = resolveIntentWindow()
+  pinnedWindowId = r.windowId
+  pinnedContext = r.context
+  return { pinned: !!pinnedWindowId }
+}
+
+module.exports = {
+  captureAndUnderstand,
+  startIntentTracking,
+  currentContext,
+  pinIntentWindow,
+}

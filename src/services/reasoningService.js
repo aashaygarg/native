@@ -34,42 +34,49 @@ function buildPrompt(text, question) {
     '\n\nGenerate a helpful answer.'
 }
 
-async function streamSolve(text, question, onChunk) {
-  const response = await fetch(OLLAMA_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      prompt: buildPrompt(text, question),
-      stream: true,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Ollama request failed: ${response.status}`)
-  }
-
-  // Ollama streams newline-delimited JSON: one { response, done } per token.
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
+async function streamSolve(text, question, onChunk, signal) {
   let answer = ''
-  let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let nl
-    while ((nl = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, nl).trim()
-      buffer = buffer.slice(nl + 1)
-      if (!line) continue
-      let obj
-      try { obj = JSON.parse(line) } catch (e) { continue }
-      if (obj.response) {
-        answer += obj.response
-        onChunk(obj.response)
+  try {
+    const response = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        prompt: buildPrompt(text, question),
+        stream: true,
+      }),
+      signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Ollama request failed: ${response.status}`)
+    }
+
+    // Ollama streams newline-delimited JSON: one { response, done } per token.
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let nl
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim()
+        buffer = buffer.slice(nl + 1)
+        if (!line) continue
+        let obj
+        try { obj = JSON.parse(line) } catch (e) { continue }
+        if (obj.response) {
+          answer += obj.response
+          onChunk(obj.response)
+        }
       }
     }
+  } catch (e) {
+    // Stop button aborts the fetch; keep whatever was generated so far.
+    if (signal && signal.aborted) return answer.trim()
+    throw e
   }
   return answer.trim()
 }
