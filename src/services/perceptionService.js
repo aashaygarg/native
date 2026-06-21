@@ -15,35 +15,15 @@ const readline = require('readline')
 const fs = require('fs')
 
 const { captureScreen } = require('./captureService')
+const adaptiveOcr = require('./adaptiveOcrService')
 
 const SCREENCAPTURE = '/usr/sbin/screencapture'
 const WINDOW_PNG = '/tmp/native-window.png'
 
-const VISION_SRC = '/tmp/native-visionocr.swift'
-const VISION_BIN = '/tmp/native-visionocr'
 const WINQUERY_SRC = '/tmp/native-winquery.swift'
 const WINQUERY_BIN = '/tmp/native-winquery'
 const CLICKMON_SRC = '/tmp/native-clickmon.swift'
 const CLICKMON_BIN = '/tmp/native-clickmon'
-
-// Tiny macOS Vision OCR helper. Reads an image path, prints recognized text.
-// .fast level keeps it ~300 ms on a full-resolution screenshot.
-const SWIFT = `
-import Foundation
-import Vision
-import AppKit
-let a = CommandLine.arguments
-guard a.count > 1, let img = NSImage(contentsOfFile: a[1]),
-      let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { exit(1) }
-let req = VNRecognizeTextRequest()
-req.recognitionLevel = .fast
-req.usesLanguageCorrection = false
-let h = VNImageRequestHandler(cgImage: cg, options: [:])
-try? h.perform([req])
-var out = ""
-for r in (req.results ?? []) { if let t = r.topCandidates(1).first { out += t.string + "\\n" } }
-print(out)
-`
 
 // Synchronous window query: frontmost app's largest window + the window under
 // the cursor, each with the signals needed to recognise (and exclude) Native:
@@ -162,25 +142,6 @@ clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rig
 nsapp.run()
 `
 
-let visionReady = false
-function ensureVisionOCR() {
-  if (visionReady) return
-  // Compile once. The binary persists in /tmp across runs, so only the first
-  // OCR after a reboot pays the swiftc cost.
-  if (!fs.existsSync(VISION_BIN)) {
-    fs.writeFileSync(VISION_SRC, SWIFT)
-    execFileSync('swiftc', [VISION_SRC, '-o', VISION_BIN])
-  }
-  visionReady = true
-}
-
-// OCR runs on the full-resolution capture on purpose: downscaling makes UI text
-// too small for Vision to read.
-function visionOCR(imagePath) {
-  ensureVisionOCR()
-  return execFileSync(VISION_BIN, [imagePath], { maxBuffer: 1 << 24 }).toString()
-}
-
 let winQueryReady = false
 function ensureWinQuery() {
   if (winQueryReady) return
@@ -253,23 +214,35 @@ function captureWindow(windowId, outPath) {
 // can populate it without changing the resolution order.
 let pinnedWindowId = null
 
+// The window signals adaptive OCR classifies on. Pinned windows carry only an
+// id (no metadata yet), so they resolve to null context -> unknown -> Vision.
+function contextOf(w) {
+  if (!w) return null
+  return { appName: w.appName || '', bundleId: w.bundleId || '', windowTitle: w.windowTitle || '' }
+}
+
 // Intent-window hierarchy: pinned -> last clicked non-Native -> frontmost app
-// -> window under cursor. Returns a windowId to capture, or null to fall back
-// to a full-screen (monitor / desktop) capture.
+// -> window under cursor. Returns { windowId, context } — windowId is the
+// window to capture (null to fall back to a full-screen capture) and context
+// is the chosen window's { appName, bundleId, windowTitle } for OCR selection.
+// The resolution order and conditions are unchanged; only the chosen window's
+// metadata is surfaced alongside the id.
 function resolveIntentWindow() {
-  if (pinnedWindowId) return pinnedWindowId
-  if (lastClicked && lastClicked.windowId > 0) return lastClicked.windowId
+  if (pinnedWindowId) return { windowId: pinnedWindowId, context: null }
+  if (lastClicked && lastClicked.windowId > 0) {
+    return { windowId: lastClicked.windowId, context: contextOf(lastClicked) }
+  }
 
   const q = winQuery()
   if (q) {
     if (q.frontmost && q.frontmost.windowId > 0 && !isNative(q.frontmost)) {
-      return q.frontmost.windowId
+      return { windowId: q.frontmost.windowId, context: contextOf(q.frontmost) }
     }
     if (q.underCursor && q.underCursor.windowId > 0 && !isNative(q.underCursor)) {
-      return q.underCursor.windowId
+      return { windowId: q.underCursor.windowId, context: contextOf(q.underCursor) }
     }
   }
-  return null
+  return { windowId: null, context: null }
 }
 
 // Trim a small uniform margin to drop window borders/edges before OCR.
@@ -318,7 +291,7 @@ async function captureAndUnderstand() {
   // Resolve the intent window (what the user was working on before Native) and
   // capture only it. Fall back to a full-screen capture (current monitor /
   // desktop) only when no window resolves.
-  const windowId = resolveIntentWindow()
+  const { windowId, context } = resolveIntentWindow()
   let imagePath
   if (windowId) {
     captureWindow(windowId, WINDOW_PNG)
@@ -337,7 +310,9 @@ async function captureAndUnderstand() {
     return { changed: false }
   }
 
-  const text = visionOCR(WINDOW_PNG).trim()
+  // Adaptive OCR: classify the intent window, then pick the engine
+  // (code -> RapidOCR, everything else -> Apple Vision).
+  const { text } = await adaptiveOcr.extractText(WINDOW_PNG, context)
   const txtFrac = textDiffFraction(prevText, text)
   if (txtFrac <= 0.02) {
     return { changed: false }
