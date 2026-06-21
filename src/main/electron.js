@@ -7,6 +7,7 @@ const {
   pinIntentWindow,
 } = require('../services/perceptionService')
 const { streamSolve } = require('../services/reasoningService')
+const { getEnabled, setEnabled, available } = require('../services/contextService')
 
 const isDev = process.env.NODE_ENV === 'development'
 const isMac = process.platform === 'darwin'
@@ -17,6 +18,12 @@ let mainWin = null
 let currentAbort = null
 let savedBounds = null
 let interviewBounds = null
+
+// Reasoning cache (separate from perception's image/OCR cache). Perception
+// decides when to re-OCR (image diff); these decide when to re-reason.
+let lastScreenText = ''
+let lastQuestion = null
+let lastAnswer = ''
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay()
@@ -82,20 +89,30 @@ function createWindow() {
 
 app.whenReady().then(() => {
   startIntentTracking()
-  // Perception (frozen) reads the intent window into text; append reasoning to
-  // turn that text into an answer, streaming tokens to the overlay as they
-  // arrive:
-  //   intent window -> adaptive OCR -> text -> qwen3-coder stream -> answer
+  // Perception caches OCR (re-runs only when the image changes). Reasoning is
+  // cached separately: a new question on an identical screen must still answer.
+  //   screen changed (+ any question) -> OCR (by perception) + reasoning
+  //   same screen + different question -> reuse cached text + reasoning
+  //   same screen + same question      -> reuse cached answer (skip everything)
   ipcMain.handle('understand-screen', async (event, question) => {
     const result = await captureAndUnderstand()
-    if (!result.changed) return result
+    const screenText = result.changed ? result.text : lastScreenText
+    lastScreenText = screenText
+    const q = question || ''
+
+    if (!result.changed && q === lastQuestion) {
+      return { changed: true, answer: lastAnswer }
+    }
+    lastQuestion = q
+
     event.sender.send('phase', 'thinking')
     const controller = new AbortController()
     currentAbort = controller
     try {
-      const answer = await streamSolve(result.text, question, (chunk) => {
+      const answer = await streamSolve(screenText, q, (chunk) => {
         event.sender.send('understand-screen-chunk', chunk)
       }, controller.signal)
+      lastAnswer = answer
       return { changed: true, answer }
     } finally {
       currentAbort = null
@@ -132,6 +149,10 @@ app.whenReady().then(() => {
       mainWin.setSize(interviewBounds.width, interviewBounds.height)
     }
   })
+
+  // Identity context (Phase 8): which CV/JD/About docs Settings has enabled.
+  ipcMain.handle('identity-state', () => ({ enabled: getEnabled(), available: available() }))
+  ipcMain.handle('set-identity-enabled', (_e, partial) => setEnabled(partial))
 
   createWindow()
   registerHotkeys()

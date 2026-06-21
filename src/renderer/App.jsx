@@ -26,7 +26,7 @@ const HOTKEYS = [
 ]
 
 const TABS = ['Actions', 'Prompt Chips', 'History', 'Settings']
-const FONTS = { Small: 'text-xs', Normal: 'text-sm', Large: 'text-base' }
+const FONTS = { Small: 'text-[11px]', Normal: 'text-[12px]', Large: 'text-[13px]' }
 
 const STATUS = {
   idle: '',
@@ -52,6 +52,40 @@ function extractCode(text) {
   return blocks.join('\n\n')
 }
 
+// Dense, reading-first answer rendering: prose at the chosen size, headers a
+// touch larger/bolder, fenced code compact and monospace. No markdown library.
+function renderAnswer(text, proseClass) {
+  const out = []
+  text.split(/(```[\s\S]*?```)/g).forEach((block, bi) => {
+    if (!block) return
+    if (block.startsWith('```')) {
+      const code = block.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').replace(/\n$/, '')
+      out.push(
+        <pre key={'c' + bi} className="my-1 overflow-x-auto rounded bg-black/30 px-2 py-1 font-mono text-[11px] leading-[1.25] text-neutral-100">{code}</pre>
+      )
+      return
+    }
+    block.split('\n').forEach((line, li) => {
+      const key = 'b' + bi + 'l' + li
+      if (line.trim() === '') {
+        out.push(<div key={key} className="h-1.5" />)
+        return
+      }
+      const h = line.match(/^\s*(?:#{1,4}\s+(.+)|\*\*(.+?)\*\*:?\s*)$/)
+      if (h) {
+        out.push(
+          <div key={key} className="mt-1.5 text-[13px] font-semibold leading-[1.35] text-neutral-100">{(h[1] || h[2]).trim()}</div>
+        )
+      } else {
+        out.push(
+          <div key={key} className={`whitespace-pre-wrap break-words leading-[1.35] text-neutral-200 ${proseClass}`}>{line}</div>
+        )
+      }
+    })
+  })
+  return out
+}
+
 export default function App() {
   const [status, setStatus] = useState('idle')
   const [answer, setAnswer] = useState('')
@@ -65,6 +99,10 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0)
   const [tab, setTab] = useState(null) // only one open at a time; null = none
   const [font, setFont] = useState('Normal')
+  const [identity, setIdentity] = useState({
+    enabled: { cv: true, jd: true, about: true },
+    available: { cv: false, jd: false, about: false },
+  })
 
   const inputRef = useRef(null)
   const answerRef = useRef(null)
@@ -150,6 +188,12 @@ export default function App() {
     answerRef.current && answerRef.current.scrollBy({ top: dy })
   }
 
+  function toggleIdentity(key) {
+    const next = !identity.enabled[key]
+    window.native.setIdentityEnabled({ [key]: next })
+    setIdentity((s) => ({ ...s, enabled: { ...s.enabled, [key]: next } }))
+  }
+
   // Toggle a tab: opening one closes the others; clicking the open one closes it.
   function toggleTab(t) {
     setTab((cur) => (cur === t ? null : t))
@@ -174,6 +218,11 @@ export default function App() {
 
   useEffect(() => {
     return window.native.onHotkey((a) => dispatchRef.current(a))
+  }, [])
+
+  // Load the identity-context toggles once.
+  useEffect(() => {
+    window.native.identityState().then(setIdentity).catch(() => {})
   }, [])
 
   // Poll the current intent-window context (the last touched window) for the
@@ -212,7 +261,7 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/60 text-neutral-100 backdrop-blur-2xl">
       {/* 1. Current context (pin) */}
-      <header style={drag} className="flex select-none items-center justify-between border-b border-white/10 px-3 py-2">
+      <header style={drag} className="flex select-none items-center justify-between border-b border-white/10 px-2.5 py-1.5">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${busy ? 'bg-amber-400/80' : 'bg-emerald-400/80'}`} />
           <span className="text-sm font-medium tracking-tight">Native</span>
@@ -220,7 +269,7 @@ export default function App() {
             style={noDrag}
             onClick={handlePin}
             title="Pin current window"
-            className={`text-xs ${pinned ? 'text-emerald-300' : 'text-neutral-300'} hover:text-neutral-100`}
+            className={`text-[10px] ${pinned ? 'text-emerald-300/90' : 'text-neutral-400'} hover:text-neutral-200`}
           >
             📌 {contextLabel}{pinned ? ' • pinned' : ''}
           </button>
@@ -232,7 +281,7 @@ export default function App() {
       </header>
 
       {/* Collapse only changes window size; nothing below ever disappears. */}
-      <main className="flex flex-1 flex-col gap-2 overflow-hidden px-3 py-2">
+      <main className="flex flex-1 flex-col gap-1.5 overflow-hidden px-2.5 py-1.5">
         {/* 2. Input box */}
         <input
           ref={inputRef}
@@ -241,7 +290,7 @@ export default function App() {
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleUnderstand() }}
           placeholder="Ask something..."
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 outline-none focus:border-white/20"
+          className="w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[13px] text-neutral-100 placeholder-neutral-500 outline-none focus:border-white/20"
         />
 
         {/* 3. Four horizontal tabs (one open at a time) */}
@@ -326,6 +375,27 @@ export default function App() {
               </div>
             </div>
             <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">Identity context</div>
+              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                {[['cv', 'Master CV'], ['jd', 'Job Description'], ['about', 'About Me']].map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => toggleIdentity(k)}
+                    disabled={!identity.available[k]}
+                    className={`rounded px-2 py-0.5 ${
+                      !identity.available[k]
+                        ? 'cursor-not-allowed bg-white/5 text-neutral-600'
+                        : identity.enabled[k]
+                          ? 'bg-emerald-500/30 text-emerald-100'
+                          : 'bg-white/5 text-neutral-400 hover:bg-white/10'
+                    }`}
+                  >
+                    {identity.enabled[k] ? '✓ ' : ''}{label}{!identity.available[k] ? ' (missing)' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">Preferences</div>
               <div className="flex items-center gap-2 text-[11px] text-neutral-300">
                 <span>Answer text size</span>
@@ -344,10 +414,10 @@ export default function App() {
         )}
 
         {/* 4. Answer area — consumes the rest of the overlay */}
-        <div ref={answerRef} style={noDrag} className="flex-1 overflow-auto rounded-lg bg-black/10 px-2 py-1">
+        <div ref={answerRef} style={noDrag} className="flex-1 overflow-auto rounded-lg bg-black/10 px-2 py-1.5">
           {answer
-            ? <pre className={`whitespace-pre-wrap break-words leading-relaxed text-neutral-200 ${FONTS[font]}`}>{answer}</pre>
-            : <p className="text-xs text-neutral-500">Answer will appear here.</p>}
+            ? renderAnswer(answer, FONTS[font])
+            : <p className="text-[11px] text-neutral-500">Answer will appear here.</p>}
         </div>
       </main>
     </div>

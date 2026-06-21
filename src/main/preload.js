@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('native', {
   pinWindow: () => ipcRenderer.invoke('pin-window'),
   setCollapsed: (collapsed) => ipcRenderer.invoke('set-collapsed', collapsed),
   setInterview: (on) => ipcRenderer.invoke('set-interview', on),
+  identityState: () => ipcRenderer.invoke('identity-state'),
+  setIdentityEnabled: (partial) => ipcRenderer.invoke('set-identity-enabled', partial),
   // Subscribe to streamed answer tokens; returns an unsubscribe function.
   onAnswerChunk: (cb) => {
     const listener = (_e, chunk) => cb(chunk)
