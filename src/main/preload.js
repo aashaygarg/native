@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('native', {
   setInterview: (on) => ipcRenderer.invoke('set-interview', on),
   identityState: () => ipcRenderer.invoke('identity-state'),
   setIdentityEnabled: (partial) => ipcRenderer.invoke('set-identity-enabled', partial),
+  voiceStart: () => ipcRenderer.invoke('voice-start'),
+  voiceStop: () => ipcRenderer.invoke('voice-stop'),
   // Subscribe to streamed answer tokens; returns an unsubscribe function.
   onAnswerChunk: (cb) => {
     const listener = (_e, chunk) => cb(chunk)

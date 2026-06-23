@@ -8,6 +8,7 @@ const {
 } = require('../services/perceptionService')
 const { streamSolve } = require('../services/reasoningService')
 const { getEnabled, setEnabled, available } = require('../services/contextService')
+const { startRecording, stopRecording, transcribe } = require('../services/speechService')
 
 const isDev = process.env.NODE_ENV === 'development'
 const isMac = process.platform === 'darwin'
@@ -154,6 +155,14 @@ app.whenReady().then(() => {
   ipcMain.handle('identity-state', () => ({ enabled: getEnabled(), available: available() }))
   ipcMain.handle('set-identity-enabled', (_e, partial) => setEnabled(partial))
 
+  // Voice input (Phase 9): record the mic, then stop+transcribe -> text. Voice
+  // only fills the renderer's input box; it never submits.
+  ipcMain.handle('voice-start', () => startRecording())
+  ipcMain.handle('voice-stop', async () => {
+    await stopRecording()
+    return transcribe()
+  })
+
   createWindow()
   registerHotkeys()
 
@@ -171,6 +180,7 @@ function registerHotkeys() {
   const map = {
     'Alt+Command+U': () => { show(); send('understand') },
     'Alt+Command+F': () => { show(); send('focus-input') },
+    'Alt+Command+V': () => { show(); send('voice') },
     'Alt+Command+X': () => send('stop'),
     'Alt+Command+H': () => { if (mainWin) (mainWin.isVisible() ? mainWin.hide() : mainWin.show()) },
     'Alt+Command+P': () => send('pin'),

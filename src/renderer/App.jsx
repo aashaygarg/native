@@ -13,6 +13,7 @@ const CHIPS = {
 
 const HOTKEYS = [
   ['⌥⌘U', 'Understand screen'],
+  ['⌥⌘V', 'Voice input'],
   ['⌥⌘F', 'Focus input'],
   ['⌥⌘X', 'Stop generation'],
   ['⌥⌘H', 'Hide / show overlay'],
@@ -27,6 +28,8 @@ const HOTKEYS = [
 
 const TABS = ['Actions', 'Prompt Chips', 'History', 'Settings']
 const FONTS = { Small: 'text-[11px]', Normal: 'text-[12px]', Large: 'text-[13px]' }
+const VOICE_ICON = { idle: '🎤', listening: '🔴', transcribing: '📝', done: '✓' }
+const VOICE_STATUS = { idle: '🎤 Ready', listening: '🔴 Listening...', transcribing: '📝 Transcribing...', done: '✓ Done' }
 
 const STATUS = {
   idle: '',
@@ -99,6 +102,7 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0)
   const [tab, setTab] = useState(null) // only one open at a time; null = none
   const [font, setFont] = useState('Normal')
+  const [voice, setVoice] = useState('idle') // idle | listening | transcribing | done
   const [identity, setIdentity] = useState({
     enabled: { cv: true, jd: true, about: true },
     available: { cv: false, jd: false, about: false },
@@ -188,6 +192,31 @@ export default function App() {
     answerRef.current && answerRef.current.scrollBy({ top: dy })
   }
 
+  // Voice only fills the input box (the source of truth); it never submits.
+  async function toggleVoice() {
+    if (voice === 'listening') {
+      setVoice('transcribing')
+      try {
+        const text = await window.native.voiceStop()
+        if (text) {
+          setQuestion((q) => (q.trim() ? q.trim() + ' ' + text : text))
+          inputRef.current && inputRef.current.focus()
+        }
+        setVoice('done')
+        setTimeout(() => setVoice('idle'), 1200)
+      } catch (err) {
+        setVoice('idle')
+      }
+    } else if (voice !== 'transcribing') {
+      try {
+        const ok = await window.native.voiceStart()
+        setVoice(ok ? 'listening' : 'idle')
+      } catch (err) {
+        setVoice('idle')
+      }
+    }
+  }
+
   function toggleIdentity(key) {
     const next = !identity.enabled[key]
     window.native.setIdentityEnabled({ [key]: next })
@@ -205,6 +234,7 @@ export default function App() {
       case 'understand': handleUnderstand(); break
       case 'focus-input': inputRef.current && inputRef.current.focus(); break
       case 'stop': handleStop(); break
+      case 'voice': toggleVoice(); break
       case 'pin': handlePin(); break
       case 'scroll-down': scroll(140); break
       case 'scroll-up': scroll(-140); break
@@ -282,16 +312,28 @@ export default function App() {
 
       {/* Collapse only changes window size; nothing below ever disappears. */}
       <main className="flex flex-1 flex-col gap-1.5 overflow-hidden px-2.5 py-1.5">
-        {/* 2. Input box */}
-        <input
-          ref={inputRef}
-          style={noDrag}
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleUnderstand() }}
-          placeholder="Ask something..."
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[13px] text-neutral-100 placeholder-neutral-500 outline-none focus:border-white/20"
-        />
+        {/* 2. Input box + voice */}
+        <div style={noDrag} className="flex items-center gap-1.5">
+          <input
+            ref={inputRef}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleUnderstand() }}
+            placeholder="Ask something..."
+            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[13px] text-neutral-100 placeholder-neutral-500 outline-none focus:border-white/20"
+          />
+          <button
+            onClick={toggleVoice}
+            disabled={voice === 'transcribing'}
+            title="Voice input (⌥⌘V)"
+            className={`rounded-lg border border-white/10 px-2 py-1.5 text-sm transition ${voice === 'listening' ? 'bg-red-500/30' : 'bg-white/10 hover:bg-white/20'}`}
+          >
+            {VOICE_ICON[voice]}
+          </button>
+        </div>
+        {voice !== 'idle' && (
+          <div className="text-[10px] text-neutral-400">{VOICE_STATUS[voice]}</div>
+        )}
 
         {/* 3. Four horizontal tabs (one open at a time) */}
         <div style={noDrag} className="flex gap-1">
